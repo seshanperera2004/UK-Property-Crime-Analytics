@@ -1,0 +1,163 @@
+--create database--
+
+CREATE DATABASE YorkshireCrimeDB;
+
+USE YorkshireCrimeDB;
+
+--create table--
+DROP TABLE IF EXISTS CrimeData;
+
+CREATE TABLE CrimeData (
+    CrimeID INT,
+    Month VARCHAR(20),
+    ReportedBy VARCHAR(100),
+    FallsWithin VARCHAR(100),
+    Longitude FLOAT,
+    Latitude FLOAT,
+    Location VARCHAR(200),
+    LSOAName VARCHAR(200),
+    CrimeType VARCHAR(100),
+    LastOutcomeCategory VARCHAR(200),
+    Context VARCHAR(100)
+);
+
+--- BULK INSERT from CSV file---
+BULK INSERT CrimeData
+FROM 'A:\CSV Files'
+WITH (
+    FIRSTROW = 2,  -- Skip header row
+    FIELDTERMINATOR = ',',
+    ROWTERMINATOR = '\n',
+    MAXERRORS = 10000
+);
+GO
+
+
+SELECT*
+FROM dbo.yorkshire_Crime_Merged
+
+-- 1️ Check table info and sample data
+SELECT TOP (10) * 
+FROM dbo.yorkshire_Crime_Merged;
+
+SELECT COUNT(*) AS TotalRows 
+FROM dbo.yorkshire_Crime_Merged;
+
+
+-- 2️ Remove duplicate records
+
+;WITH CTE AS (
+    SELECT *,
+           ROW_NUMBER() OVER (PARTITION BY Crime_ID ORDER BY Crime_ID) AS rn
+    FROM dbo.yorkshire_Crime_Merged
+)
+DELETE FROM CTE WHERE rn > 1;
+
+-- Verify duplicates removed
+SELECT COUNT(*) AS TotalDuplicates
+FROM (
+    SELECT Crime_ID
+    FROM dbo.yorkshire_Crime_Merged
+    GROUP BY Crime_ID
+    HAVING COUNT(*) > 1
+) AS DupCheck;
+
+
+-- 3️ Handle missing or empty values
+
+-- Replace blank strings with NULL first (for consistency)
+UPDATE dbo.yorkshire_Crime_Merged
+SET Crime_type = NULLIF(LTRIM(RTRIM(Crime_type)), '');
+UPDATE dbo.yorkshire_Crime_Merged
+SET Last_outcome_category = NULLIF(LTRIM(RTRIM(Last_outcome_category)), '');
+UPDATE dbo.yorkshire_Crime_Merged
+SET Location = NULLIF(LTRIM(RTRIM(Location)), '');
+UPDATE dbo.yorkshire_Crime_Merged
+SET Falls_within = NULLIF(LTRIM(RTRIM(Falls_within)), '');
+
+-- Replace NULLs with meaningful defaults
+UPDATE dbo.yorkshire_Crime_Merged
+SET Crime_type = 'Unknown'
+WHERE Crime_type IS NULL;
+
+UPDATE dbo.yorkshire_Crime_Merged
+SET Last_outcome_category = 'No Outcome'
+WHERE Last_outcome_category IS NULL;
+
+UPDATE dbo.yorkshire_Crime_Merged
+SET Falls_within = 'Unspecified Police Force'
+WHERE Falls_within IS NULL;
+
+UPDATE dbo.yorkshire_Crime_Merged
+SET Location = 'Unspecified Location'
+WHERE Location IS NULL;
+
+
+-- 4️ Fix invalid coordinates (Latitude/Longitude)
+
+DELETE FROM dbo.yorkshire_Crime_Merged
+WHERE Longitude IS NULL 
+   OR Latitude IS NULL
+   OR Longitude = 0 
+   OR Latitude = 0
+   OR Longitude NOT BETWEEN -10 AND 5   -- roughly UK long range
+   OR Latitude NOT BETWEEN 49 AND 61;   -- roughly UK lat range
+
+
+-- 5️ Ensure Month column is stored as DATE type
+
+-- If the Month column is text (e.g. '2023-01')
+-- first check its format
+SELECT TOP (10) Month 
+FROM dbo.yorkshire_Crime_Merged;
+
+-- Convert text format (YYYY-MM) to date (use first day of month)
+UPDATE dbo.yorkshire_Crime_Merged
+SET Month = TRY_CONVERT(DATE, Month + '-01')
+WHERE ISDATE(Month) = 0;
+
+-- Change column type if needed
+-- (Run only if Month is NVARCHAR, not DATE)
+-- ALTER TABLE CrimeData ALTER COLUMN Month DATE;
+
+
+-- 6️ Trim and normalize text columns
+
+UPDATE dbo.yorkshire_Crime_Merged
+SET Crime_type = UPPER(LTRIM(RTRIM(Crime_type))),
+    Last_outcome_category = UPPER(LTRIM(RTRIM(Last_outcome_category))),
+    Falls_within = UPPER(LTRIM(RTRIM(Falls_within))),
+    Location = UPPER(LTRIM(RTRIM(Location))),
+    LSOA_Name = UPPER(LTRIM(RTRIM(LSOA_Name)));
+
+
+-- 7️⃣ Optional: filter for the four Yorkshire & Humber regions only
+
+-- Keep data for West Yorkshire, South Yorkshire, Humberside, and North Yorkshire
+DELETE FROM dbo.yorkshire_Crime_Merged
+WHERE Falls_within NOT LIKE '%WEST YORKSHIRE%'
+  AND Falls_within NOT LIKE '%SOUTH YORKSHIRE%'
+  AND Falls_within NOT LIKE '%HUMBERSIDE%'
+  AND Falls_within NOT LIKE '%NORTH YORKSHIRE%';
+
+
+-- 8️ Verify cleaned dataset
+
+-- Count nulls per column
+SELECT 
+    SUM(CASE WHEN Crime_ID IS NULL THEN 1 ELSE 0 END) AS Missing_CrimeID,
+    SUM(CASE WHEN Crime_type = 'UNKNOWN' THEN 1 ELSE 0 END) AS Replaced_CrimeType,
+    SUM(CASE WHEN Last_outcome_category = 'NO OUTCOME' THEN 1 ELSE 0 END) AS Replaced_Outcome
+FROM dbo.yorkshire_Crime_Merged;
+
+-- Summary by Year and Force
+SELECT YEAR(Month) AS Year, Falls_within, COUNT(*) AS TotalCrimes
+FROM dbo.yorkshire_Crime_Merged
+GROUP BY YEAR(Month), Falls_within
+ORDER BY Year, Falls_within;
+
+
+--  End of Cleaning Script
+
+
+

@@ -1,0 +1,131 @@
+
+-- Step 5: Check initial county distribution
+SELECT 
+    county,
+    COUNT(*) AS row_count,
+    CAST(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM PropertyPrices) AS DECIMAL(5,2)) AS percentage
+FROM PropertyPrices 
+GROUP BY county
+ORDER BY row_count DESC;
+GO
+
+-- Step 6: Check Lancashire districts before cleaning
+SELECT 
+    district,
+    COUNT(*) AS property_count,
+    AVG(price) AS average_price
+FROM PropertyPrices 
+WHERE county LIKE '%Lancashire%'
+GROUP BY district
+ORDER BY property_count DESC;
+GO
+
+-- Step 7: Filter to Lancashire only and standardize names
+-- Keep only Lancashire data and standardize county name
+UPDATE PropertyPrices 
+SET county = 'Lancashire'
+WHERE county LIKE '%Lancashire%' 
+   OR county IN ('LANCASHIRE', 'Lancs', 'LANCS')
+   OR district IN (
+       'Preston', 'Lancaster', 'Blackburn with Darwen', 'Blackburn', 'Blackpool', 'Burnley',
+       'Ribble Valley', 'Wyre', 'Fylde', 'South Ribble', 'Chorley',
+       'West Lancashire', 'Pendle', 'Rossendale', 'Hyndburn'
+   );
+
+-- Delete non-Lancashire data
+DELETE FROM PropertyPrices 
+WHERE county != 'Lancashire';
+GO
+
+-- Step 8: Standardize district names within Lancashire
+UPDATE PropertyPrices 
+SET district = 
+    CASE 
+        WHEN district LIKE '%Preston%' THEN 'Preston'
+        WHEN district LIKE '%Lancaster%' THEN 'Lancaster' 
+        WHEN district LIKE '%Blackburn%' THEN 'Blackburn with Darwen'
+        WHEN district LIKE '%Blackpool%' THEN 'Blackpool'
+        WHEN district LIKE '%Burnley%' THEN 'Burnley'
+        WHEN district LIKE '%Ribble Valley%' THEN 'Ribble Valley'
+        WHEN district LIKE '%Wyre%' THEN 'Wyre'
+        WHEN district LIKE '%Fylde%' THEN 'Fylde'
+        WHEN district LIKE '%South Ribble%' THEN 'South Ribble'
+        WHEN district LIKE '%Chorley%' THEN 'Chorley'
+        WHEN district LIKE '%West Lancashire%' THEN 'West Lancashire'
+        WHEN district LIKE '%Pendle%' THEN 'Pendle'
+        WHEN district LIKE '%Rossendale%' THEN 'Rossendale'
+        WHEN district LIKE '%Hyndburn%' THEN 'Hyndburn'
+        ELSE district
+    END
+WHERE county = 'Lancashire';
+GO
+
+-- Step 9: Data Quality Checks on Lancashire Data
+
+-- 9.1 Check for NULL values in critical columns
+SELECT 
+    COUNT(*) AS total_rows,
+    SUM(CASE WHEN transaction_id IS NULL THEN 1 ELSE 0 END) AS null_transaction_id,
+    SUM(CASE WHEN price IS NULL THEN 1 ELSE 0 END) AS null_price,
+    SUM(CASE WHEN date_of_transfer IS NULL THEN 1 ELSE 0 END) AS null_date,
+    SUM(CASE WHEN postcode IS NULL THEN 1 ELSE 0 END) AS null_postcode,
+    SUM(CASE WHEN property_type IS NULL THEN 1 ELSE 0 END) AS null_property_type
+FROM PropertyPrices;
+GO
+
+-- 9.2 Check for invalid prices (zero or negative)
+SELECT COUNT(*) AS invalid_prices
+FROM PropertyPrices 
+WHERE price <= 0 OR price IS NULL;
+GO
+
+-- 9.3 Check for invalid dates
+SELECT COUNT(*) AS invalid_dates
+FROM PropertyPrices 
+WHERE date_of_transfer IS NULL OR date_of_transfer > GETDATE();
+GO
+
+-- 9.4 Check property_type values
+SELECT DISTINCT property_type, COUNT(*) AS count
+FROM PropertyPrices 
+GROUP BY property_type 
+ORDER BY count DESC;
+GO
+
+-- Step 10: Data Cleaning Operations on Lancashire Data
+
+-- 10.1 Remove rows with critical missing data
+DELETE FROM PropertyPrices 
+WHERE transaction_id IS NULL 
+   OR price IS NULL 
+   OR date_of_transfer IS NULL;
+GO
+
+-- 10.2 Remove rows with invalid prices
+DELETE FROM PropertyPrices WHERE price <= 0;
+GO
+
+-- 10.3 Remove rows with future dates
+DELETE FROM PropertyPrices WHERE date_of_transfer > GETDATE();
+GO
+
+-- 10.4 Standardize property_type values
+UPDATE PropertyPrices 
+SET property_type = UPPER(TRIM(property_type))
+WHERE property_type IS NOT NULL;
+GO
+
+-- 10.5 Clean postcodes - remove spaces and standardize format
+UPDATE PropertyPrices 
+SET postcode = UPPER(REPLACE(postcode, ' ', ''))
+WHERE postcode IS NOT NULL;
+GO
+
+-- 10.6 Remove duplicate transactions (keep the latest one)
+WITH CTE AS (
+    SELECT *,
+        ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY date_of_transfer DESC) as rn
+    FROM PropertyPrices
+)
+DELETE FROM CTE WHERE rn > 1;
+GO

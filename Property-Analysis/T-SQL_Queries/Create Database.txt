@@ -1,0 +1,42 @@
+-- Step 1: Create Database
+CREATE DATABASE LancashirePropertyDB;
+GO
+
+USE LancashirePropertyDB;
+GO
+
+-- Step 2: Create main table with proper data types
+CREATE TABLE PropertyPrices (
+    transaction_id NVARCHAR(100),
+    price DECIMAL(15,2),
+    date_of_transfer DATE,
+    postcode NVARCHAR(20),
+    property_type NVARCHAR(10),
+    new_build_flag NVARCHAR(10),
+    tenure_type NVARCHAR(10),
+    paon NVARCHAR(255),
+    saon NVARCHAR(255),
+    street NVARCHAR(255),
+    locality NVARCHAR(255),
+    town_city NVARCHAR(255),
+    district NVARCHAR(255),
+    county NVARCHAR(255),
+    ppd_category_type NVARCHAR(10),
+    record_status NVARCHAR(100)
+);
+GO
+
+-- Step 3: BULK INSERT from CSV file
+BULK INSERT PropertyPrices
+FROM 'E:\KDU\Work\2nd Semester\SQL\Assignment 01\Dataset\lancashire_merged_2020_2024.csv'
+WITH (
+    FIRSTROW = 2,  -- Skip header row
+    FIELDTERMINATOR = ',',
+    ROWTERMINATOR = '\n',
+    MAXERRORS = 10000
+);
+GO
+
+-- Step 4: Initial import verification
+SELECT COUNT(*) AS 'Total Rows Imported' FROM PropertyPrices;
+GO

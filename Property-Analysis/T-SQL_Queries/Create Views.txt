@@ -1,0 +1,85 @@
+CREATE VIEW vw_CleanPropertyPrices AS
+SELECT 
+    transaction_id,
+    price,
+    date_of_transfer,
+    postcode,
+    property_type,
+    new_build_flag,
+    tenure_type,
+    paon,
+    saon,
+    street,
+    locality,
+    town_city,
+    district,
+    county,
+    ppd_category_type,
+    record_status
+FROM PropertyPrices
+WHERE price > 0 
+  AND date_of_transfer IS NOT NULL 
+  AND transaction_id IS NOT NULL
+  AND county = 'Lancashire';
+GO
+
+-- Step 12: Create optimized views for Power BI visualizations
+
+-- 12.1 View for Average Price by Lancashire District (Bar Chart)
+CREATE VIEW vw_DistrictAnalysis AS
+SELECT 
+    district,
+    COUNT(*) AS transaction_count,
+    AVG(price) AS average_price,
+    MIN(price) AS min_price,
+    MAX(price) AS max_price
+FROM vw_CleanPropertyPrices
+GROUP BY district;
+GO
+
+-- 12.2 View for Property Type Distribution (Pie/Donut Chart)
+CREATE VIEW vw_PropertyTypeAnalysis AS
+SELECT 
+    property_type,
+    COUNT(*) AS count,
+    CAST(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM vw_CleanPropertyPrices) AS DECIMAL(5,2)) AS percentage
+FROM vw_CleanPropertyPrices
+GROUP BY property_type;
+GO
+
+-- 12.3 View for Monthly Sales Trends (Line Chart)
+CREATE VIEW vw_MonthlyTrends AS
+SELECT 
+    YEAR(date_of_transfer) AS year,
+    MONTH(date_of_transfer) AS month,
+    DATEFROMPARTS(YEAR(date_of_transfer), MONTH(date_of_transfer), 1) AS month_date,
+    COUNT(*) AS sales_volume,
+    AVG(price) AS average_price
+FROM vw_CleanPropertyPrices
+GROUP BY YEAR(date_of_transfer), MONTH(date_of_transfer);
+GO
+
+-- 12.4 View for Top 10 Most Expensive Sales (Table)
+CREATE VIEW vw_TopExpensiveProperties AS
+SELECT TOP 10
+    transaction_id,
+    price,
+    date_of_transfer,
+    property_type,
+    district,
+    postcode,
+    street,
+    town_city
+FROM vw_CleanPropertyPrices
+ORDER BY price DESC;
+GO
+
+-- 12.5 View for Yearly Summary (for filters)
+CREATE VIEW vw_YearlySummary AS
+SELECT 
+    YEAR(date_of_transfer) AS year,
+    COUNT(*) AS total_sales,
+    AVG(price) AS average_price
+FROM vw_CleanPropertyPrices
+GROUP BY YEAR(date_of_transfer);
+GO
